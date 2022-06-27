@@ -4,6 +4,9 @@ module Data.ITree where
 open import Relation.Binary.PropositionalEquality
 open import Data.Unit 
 open import Level
+open import Function
+open import Category.MonadSuc
+open import Data.Sum 
 
 private 
     variable
@@ -34,11 +37,6 @@ private
 
 data EmptyE : Set → Set where
 
-record MonadSuc (M : Set f → Set (suc f)) : Set (suc f) where
-    field
-        _>>=_ : {A B : Set f} → M A → (A → M B) → M B 
-        return : {A : Set f} → A → M A 
-
 MonadSucITree : MonadSuc (ITree E)
 MonadSucITree = record { _>>=_ = _>>=_; return = ret } 
     where
@@ -47,8 +45,23 @@ MonadSucITree = record { _>>=_ = _>>=_; return = ret }
     ret x >>= f = f x
     tau x >>= f = tau (bind-τ x λ t → mk-tau (f t))
     vis e k >>= f = vis e λ y → (k y) >>= f  
-    τ (bind-τ x f) = tau (bind-τ x f) -- is this correct?
+    τ (bind-τ x f) = (τ x) >>= (tau ∘ f) 
 
 -- helper for triggering an effect
 trigger : (e : E A) → ITree E A
 trigger e = vis e ret 
+
+_⊕_ : (Set → Set) → (Set → Set) → Set → Set
+(f ⊕ g) x = f x ⊎ g x 
+infixr 3 _⊕_
+
+_↝_ : (Set → Set) → (Set → Set) → Set → Set
+(f ↝ g) x = f x → g x   
+infixr 1 _↝_
+
+
+-- Indexes Itree/Tau by terminating programs
+data Terminates : ITree E R → Set₁ where
+    ret' : (r : R) → Terminates {E = E} (ret r)
+    tau' : {t : Tau E R} → Terminates (τ t) → Terminates (tau t)
+    vis' : {A : Set} → (e : E A) → {j : A → ITree E R} → (k : (a : A) → Terminates (j a)) → Terminates (vis e j)
