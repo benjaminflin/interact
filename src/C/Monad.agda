@@ -75,6 +75,9 @@ module CRun {M : Set → Set} (m : RawMonad M) where
     runC : CState → CRun M A → M (Sumₗ (A × CState))
     runC cs cr = cr cs   
 
+    put′ : CState → CRun M ⊤ 
+    put′ c = put c >> return tt 
+
     malloc : ℕ → CRun M CVal 
     malloc n = do
         cs ← get
@@ -85,11 +88,11 @@ module CRun {M : Set → Set} (m : RawMonad M) where
             heap = (heap-count cs , replicate n nothing) ∷ heap cs;
             heap-count = 1 + heap-count cs } 
 
-    free' : ℕ → CRun M (Lift Level.zero ⊤)  
+    free' : ℕ → CRun M ⊤ 
     free' addr = do
         cs ← get 
         nh ← newHeap (heap cs)
-        put record cs { heap = nh }
+        put′ record cs { heap = nh }
         where
         newHeap : List (ℕ × List (Maybe CVal)) → CRun M (List (ℕ × List (Maybe CVal)))
         newHeap [] = throw (not-allocated addr)
@@ -97,7 +100,7 @@ module CRun {M : Set → Set} (m : RawMonad M) where
         ... | true = return xs 
         ... | false = ((addr' , vals) ∷_) <$> newHeap xs 
 
-    free : CVal → CRun M (Lift Level.zero ⊤)     
+    free : CVal → CRun M ⊤     
     free (ptr false x _) = free' x
     free (ptr true x _) = throw (not-allocated x)
     free x = throw (not-a-ptr x)
@@ -153,17 +156,17 @@ module CRun {M : Set → Set} (m : RawMonad M) where
             <=< lookup′ (not-allocated addr) addr
     deref x = throw (not-a-ptr x)
 
-    set′ : (stack : Bool) → (addr : ℕ) → (off : ℕ) → CVal → CRun M (Lift Level.zero ⊤)  
+    set′ : (stack : Bool) → (addr : ℕ) → (off : ℕ) → CVal → CRun M ⊤  
     set′ false addr off val = 
         setHeap
         =<< modifyHeap 
         =<< heap <$> get
         where
 
-        setHeap : List (ℕ × List (Maybe CVal)) → CRun M (Lift Level.zero ⊤)   
+        setHeap : List (ℕ × List (Maybe CVal)) → CRun M ⊤   
         setHeap nh = do
             st ← get
-            put record st { heap = nh } 
+            put′ record st { heap = nh } 
 
         modifyHeap : List (ℕ × List (Maybe CVal)) → CRun M $ List (ℕ × List (Maybe CVal))  
         modifyHeap = modify′ (throw $ not-allocated addr) addr 
@@ -175,16 +178,16 @@ module CRun {M : Set → Set} (m : RawMonad M) where
         =<< stack <$> get
         where
 
-        setStack : List (List (Maybe CVal)) → CRun M (Lift Level.zero ⊤)   
+        setStack : List (List (Maybe CVal)) → CRun M ⊤   
         setStack ns = do
             st ← get
-            put record st { stack = ns } 
+            put′ record st { stack = ns } 
 
         modifyStack : List (List (Maybe CVal)) → CRun M $ List (List (Maybe CVal))  
         modifyStack = modify (throw $ not-in-stack addr) addr 
             (modify (throw $ out-of-bounds off) off (const $ return $ just val))
     
-    setVal : CVal → CVal → CRun M (Lift Level.zero ⊤)  
+    setVal : CVal → CVal → CRun M ⊤  
     setVal (ptr stack addr off) v = set′ stack addr off v
     setVal x v = throw (not-a-ptr x)
 
