@@ -3,6 +3,7 @@ module Data.ITree where
 
 open import Relation.Binary.PropositionalEquality
 open import Data.Unit 
+open import Data.Empty 
 open import Level
 open import Function
 open import Data.Sum 
@@ -41,9 +42,8 @@ vis e k >>= f = vis e λ y → (k y) >>= f
 tau x >>= f = tau (bind-τ x f)
 τ (bind-τ x f) = (τ x) >>= f 
 
-instance 
-    MonadITree : RawMonad (ITree i S T) 
-    MonadITree = record { _>>=_ = _>>=_; return = ret } 
+MonadITree : ∀ S T → RawMonad (ITree i S T) 
+MonadITree _ _ = record { _>>=_ = _>>=_; return = ret } 
 
 
 -- helper for triggering an effect
@@ -75,12 +75,20 @@ ITree′′ {i} e R = ITree′ i e R
 Tau′′ : {i : Size} → Effect → Set → Set 
 Tau′′ {i} e R = Tau′ i e R 
 
+∅ : Effect 
+Command ∅ = ⊥ 
+Result ∅ = ⊥-elim 
+
 infixr 3 _⊕_
 
 _⊕_ : Effect → Effect → Effect   
 Command (e ⊕ f) = Command e ⊎ Command f
 Result (e ⊕ f) (inj₁ x) = Result e x
 Result (e ⊕ f) (inj₂ y) = Result f y 
+
+MonadITree′ : ∀ E → RawMonad (ITree′′ E) 
+MonadITree′ _ = record { _>>=_ = _>>=_; return = ret } 
+
 
 
 -- Indexes Itree/Tau by terminating programs

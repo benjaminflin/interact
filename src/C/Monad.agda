@@ -2,12 +2,13 @@ module C.Monad where
 
 open import Data.Nat 
 open import Data.Integer using (ℤ) 
-open import Data.List
+open import Data.List hiding (mapMaybe; lookup)
 open import Data.Fin using (Fin)
 open import Data.Product 
 open import Data.Sum 
 open import Data.Unit hiding (_≟_)
-open import Data.Maybe hiding (_>>=_)
+import Data.Maybe as Maybe
+open Maybe hiding (_>>=_)
 import Level 
 open Level hiding (suc; zero) 
 open import Function
@@ -22,9 +23,13 @@ private
         M : Set → Set
         A : Set 
 
+Addr Offset : Set
+Addr = ℕ
+Offset = ℕ
+
 data CVal : Set where
     byte : Fin 256 → CVal 
-    ptr : (stack : Bool) → (addr : ℕ) → (off : ℕ) → CVal   
+    ptr : (stack : Bool) → (addr : Addr) → (off : Offset) → CVal   
 
 record CState : Set where 
     constructor mk-cstate
@@ -34,10 +39,10 @@ record CState : Set where
         stack : List (List (Maybe CVal)) -- stack addressed by index  
 
 data CErr : Set where 
-    out-of-bounds : ℕ → CErr 
-    not-allocated : ℕ → CErr
-    not-in-stack : ℕ → CErr   
-    uninit : ℕ → ℕ → CErr    
+    out-of-bounds : Offset → CErr 
+    not-allocated : Addr → CErr
+    not-in-stack : Addr → CErr   
+    uninit : Addr → Offset → CErr    
     not-a-ptr : CVal → CErr   
 
 
@@ -65,7 +70,7 @@ module CRun {M : Set → Set} (m : RawMonad M) where
         where open RawMonad m
 
     -- puts get/set and monad ops in scope
-    open RawIMonadState (CRunMonadState m) public
+    open RawIMonadState (CRunMonadState m) renaming (modify to change) public
 
     runC : CState → CRun M A → M (Sumₗ (A × CState))
     runC cs cr = cr cs   
@@ -80,52 +85,107 @@ module CRun {M : Set → Set} (m : RawMonad M) where
             heap = (heap-count cs , replicate n nothing) ∷ heap cs;
             heap-count = 1 + heap-count cs } 
 
+    free' : ℕ → CRun M (Lift Level.zero ⊤)  
+    free' addr = do
+        cs ← get 
+        nh ← newHeap (heap cs)
+        put record cs { heap = nh }
+        where
+        newHeap : List (ℕ × List (Maybe CVal)) → CRun M (List (ℕ × List (Maybe CVal)))
+        newHeap [] = throw (not-allocated addr)
+        newHeap ((addr' , vals) ∷ xs) with does (addr ≟ addr') 
+        ... | true = return xs 
+        ... | false = ((addr' , vals) ∷_) <$> newHeap xs 
 
-    -- free' : ℕ → CRun M ⊤  
-    -- free' addr = do
-    --     cs ← get 
-    --     nh ← newHeap (heap cs)
-    --     put $ record cs { heap = nh }
-    --     where
-    --     newHeap : List (ℕ × List (Maybe CVal)) → CRun M (List (ℕ × List (Maybe CVal)))
-    --     newHeap [] = throw (not-allocated addr)
-    --     newHeap ((addr' , vals) ∷ xs) with does (addr ≟ addr') 
-    --     ... | true = return xs 
-    --     ... | false = ((addr' , vals) ∷_) <$> newHeap xs 
+    free : CVal → CRun M (Lift Level.zero ⊤)     
+    free (ptr false x _) = free' x
+    free (ptr true x _) = throw (not-allocated x)
+    free x = throw (not-a-ptr x)
 
--- free : CVal → CM m ⊤     
--- free (ptr false x _) = free' x
--- free (ptr true x _) = throw (not-allocated x)
--- free x = throw (not-a-ptr x)
+    maybeLookup : ℕ → List A → Maybe A
+    maybeLookup n [] = nothing  
+    maybeLookup (suc n) (x ∷ xs) = maybeLookup n xs 
+    maybeLookup zero (x ∷ xs) = just x  
 
--- maybeLookup : {a : Set} → ℕ → List a → Maybe a 
--- maybeLookup n [] = nothing  
--- maybeLookup (suc n) (x ∷ xs) = maybeLookup n xs 
--- maybeLookup zero (x ∷ xs) = just x  
+    maybeLookup′ : ℕ → List (ℕ × A) → Maybe A 
+    maybeLookup′ n [] = nothing
+    maybeLookup′ n ((m , v) ∷ xs) = if does (n ≟ m) then just v else maybeLookup′ n xs  
 
--- get : CVal → CM m CVal
--- get (ptr true addr off) = do
---     cs ← getState 
---     getFromStack (stack cs)
---     where
---     getFromStack : List (List (Maybe CVal)) → CM m CVal 
---     getFromStack st with maybeLookup addr st 
---     ... | nothing = throw (not-in-stack addr) 
---     ... | just xs with maybeLookup off xs 
---     ... | just (just x) = return x
---     ... | just nothing = throw $ uninit addr off
---     ... | nothing = throw $ out-of-bounds off
--- get (ptr false addr off) = do
---     cs ← getState
---     getFromHeap (heap cs) 
---     where
---     getFromHeap : List (ℕ × List (Maybe CVal)) → CM m CVal 
---     getFromHeap [] = throw (not-allocated addr)
---     getFromHeap ((addr' , xs) ∷ hp) with does (addr ≟ addr')
---     ... | false = getFromHeap hp  
---     ... | true with maybeLookup off xs
---     ... | just (just x) = return x
---     ... | just nothing = throw $ uninit addr off 
---     ... | nothing = throw $ out-of-bounds off 
--- get x = throw (not-a-ptr x)
+    maybeModify : ℕ → (A → A) → List A → Maybe (List A)
+    maybeModify n f [] = nothing
+    maybeModify zero f (x ∷ xs) = just (f x ∷ xs)
+    maybeModify (suc n) f (x ∷ xs) = Maybe.map (x ∷_) (maybeModify n f xs)
+
+    mapMaybe : CErr → Maybe A → CRun M A 
+    mapMaybe e (just x) = return x
+    mapMaybe e nothing = throw e
+
+    lookup : CErr → ℕ → List A → CRun M A     
+    lookup e n = mapMaybe e ∘ maybeLookup n 
+
+    lookup′ : CErr → ℕ → List (ℕ × A) → CRun M A     
+    lookup′ e n = mapMaybe e ∘ maybeLookup′ n 
+
+    modify : CRun M (List A) → ℕ → (A → CRun M A) → List A → CRun M (List A) 
+    modify e n f [] = e
+    modify e zero f (x ∷ xs) = (_∷ xs) <$> f x
+    modify e (suc n) f (x ∷ xs) = (x ∷_) <$> modify e n f xs
+
+    modify′ : CRun M (List (ℕ × A)) → ℕ → (A → CRun M A) → List (ℕ × A) → CRun M (List (ℕ × A))
+    modify′ e n f [] = e
+    modify′ e n f (x@(m , v) ∷ xs) = 
+        if does (n ≟ m) then ((_∷ xs) ∘ (m ,_)) <$> f v else (x ∷_) <$> modify′ e n f xs
+
+    deref : CVal → CRun M CVal
+    deref (ptr true addr off) = getFromStack =<< stack <$> get 
+        where
+        getFromStack : List (List (Maybe CVal)) → CRun M CVal
+        getFromStack = 
+            mapMaybe (uninit addr off) 
+            <=< lookup (out-of-bounds off) off 
+            <=< lookup (not-in-stack addr) addr
+    deref (ptr false addr off) = getFromHeap =<< heap <$> get  
+        where
+        getFromHeap : List (ℕ × List (Maybe CVal)) → CRun M CVal
+        getFromHeap = 
+            mapMaybe (uninit addr off) 
+            <=< lookup (out-of-bounds off) off 
+            <=< lookup′ (not-allocated addr) addr
+    deref x = throw (not-a-ptr x)
+
+    set′ : (stack : Bool) → (addr : ℕ) → (off : ℕ) → CVal → CRun M (Lift Level.zero ⊤)  
+    set′ false addr off val = 
+        setHeap
+        =<< modifyHeap 
+        =<< heap <$> get
+        where
+
+        setHeap : List (ℕ × List (Maybe CVal)) → CRun M (Lift Level.zero ⊤)   
+        setHeap nh = do
+            st ← get
+            put record st { heap = nh } 
+
+        modifyHeap : List (ℕ × List (Maybe CVal)) → CRun M $ List (ℕ × List (Maybe CVal))  
+        modifyHeap = modify′ (throw $ not-allocated addr) addr 
+            (modify (throw $ out-of-bounds off) off (const $ return $ just val))
+
+    set′ true addr off val = 
+        setStack
+        =<< modifyStack 
+        =<< stack <$> get
+        where
+
+        setStack : List (List (Maybe CVal)) → CRun M (Lift Level.zero ⊤)   
+        setStack ns = do
+            st ← get
+            put record st { stack = ns } 
+
+        modifyStack : List (List (Maybe CVal)) → CRun M $ List (List (Maybe CVal))  
+        modifyStack = modify (throw $ not-in-stack addr) addr 
+            (modify (throw $ out-of-bounds off) off (const $ return $ just val))
+    
+    setVal : CVal → CVal → CRun M (Lift Level.zero ⊤)  
+    setVal (ptr stack addr off) v = set′ stack addr off v
+    setVal x v = throw (not-a-ptr x)
+
 
