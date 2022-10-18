@@ -57,43 +57,50 @@ orDigit : Op₂ Bit
 orDigit 0b 0b = 0b
 orDigit _ _ = 1b
 
-expand′ : Fin 256 → Vec Bit 8
-expand′ f = Vec.map (nth-bit (Fin.toℕ f) ∘ Fin.toℕ) (Vec.allFin 8)
-    where
-        2ⁿ≢0 : ∀ n → (2 ^ n) ≢ 0 
-        2ⁿ≢0 Nat.zero = λ ()
-        2ⁿ≢0 (Nat.suc n) pf with ih ← 2ⁿ≢0 n with (inj₂ x) ← m*n≡0⇒m≡0∨n≡0 2 {2 ^ n} pf = ih x
+2ⁿ≢0 : ∀ n → (2 ^ n) ≢ 0 
+2ⁿ≢0 Nat.zero = λ ()
+2ⁿ≢0 (Nat.suc n) pf with ih ← 2ⁿ≢0 n with (inj₂ x) ← m*n≡0⇒m≡0∨n≡0 2 {2 ^ n} pf = ih x
 
+2ⁿ≡suc : ∀ n → ∃[ k ] Nat.suc k ≡ (2 ^ n)  
+2ⁿ≡suc Nat.zero = Nat.zero , refl
+2ⁿ≡suc (Nat.suc n) with (k , eq) ← 2ⁿ≡suc n = k Nat.+ Nat.suc (k Nat.+ Nat.zero) , cong (λ k → 2 Nat.* k) eq 
+
+
+expand′ : Fin (2 ^ n) → Vec Bit n
+expand′ {n} f = Vec.map (nth-bit (Fin.toℕ f) ∘ Fin.toℕ) (Vec.allFin n)
+    where
         nth-bit : ℕ → ℕ → Bit 
         nth-bit n k = Fin.fromℕ< (m%n<n (_/_ n (2 ^ k) {fromWitnessFalse (2ⁿ≢0 k)}) 1)
 
 expand : Vec (Fin 256) n → Vec Bit (n Nat.* 8) 
 expand xs = xs Vec.>>= expand′
 
-contract′ : Vec Bit 8 → Fin 256  
-contract′ xs = 
+contract′ : Vec Bit n → Fin (2 ^ n)  
+contract′ {n} xs with (m , eq) ← 2ⁿ≡suc n = 
     Vec.foldr 
-        (λ _ → Fin 256) 
+        (λ _ → Fin (2 ^ n)) 
         combine
-        0b 
-        (Vec.zip (Vec.map Fin.toℕ (Vec.allFin 8)) xs)
+        (subst Fin eq 0b) 
+        (Vec.zip (Vec.map Fin.toℕ (Vec.allFin n)) xs)
     where
-        rshift : Bit → ℕ → ℕ
-        rshift bit n = (Fin.toℕ bit) Nat.* (2 ^ n)
+        shift : Bit → ℕ → ℕ
+        shift bit n = (Fin.toℕ bit) Nat.* (2 ^ n)
 
-        combine : ℕ × Bit → Fin 256 → Fin 256  
-        combine (n , bit) acc = Fin.fromℕ< $ m%n<n (Fin.toℕ acc Nat.+ rshift bit n) 255
+        combine : ℕ × Bit → Fin (2 ^ n) → Fin (2 ^ n)  
+        combine (k , bit) acc rewrite sym eq = Fin.fromℕ< $ m%n<n (Fin.toℕ acc Nat.+ shift bit k) m
 
 contract : Vec Bit (n Nat.* 8) → Vec (Fin 256) n
 contract {n} = Vec.map contract′ ∘ proj₁ ∘ Vec.group n 8 
 
-expand′∘contract′≡id : ∀ xs → expand′ (contract′ xs) ≡ xs
-expand′∘contract′≡id (0b ∷ 0b ∷ 0b ∷ 0b ∷ 0b ∷ 0b ∷ 0b ∷ 0b ∷ []) = refl
-expand′∘contract′≡id (1b ∷ 1b ∷ 1b ∷ 0b ∷ 0b ∷ 0b ∷ 0b ∷ 0b ∷ []) = refl
-expand′∘contract′≡id (x ∷ x₁ ∷ x₂ ∷ x₃ ∷ x₄ ∷ x₅ ∷ x₆ ∷ x₇ ∷ []) = {!   !}
+expand′∘contract′≡id : ∀ {n} xs → expand′ {n = n} (contract′ xs) ≡ xs
+expand′∘contract′≡id [] = refl
+expand′∘contract′≡id (x ∷ xs) = {!   !}
+
+contract′∘expand′≡id : ∀ {n} f → contract′ {n = n} (expand′ f) ≡ f 
+contract′∘expand′≡id f = {!  !} 
 
 transportBitOp′ : Op₂ Bit → Op₂ (Fin 256)   
-transportBitOp′ _·_ f₁ f₂ = contract′ $ Vec.zipWith (_·_) (expand′ f₁) (expand′ f₂)
+transportBitOp′ _·_ f₁ f₂ = contract′ {n = 8} $ Vec.zipWith (_·_) (expand′ f₁) (expand′ f₂)
 
 _⊕_ : Op₂ (Binary n)  
 _⊕_ = transportFinOp (transportBitOp′ xorDigit) 
