@@ -1,4 +1,3 @@
-{-# OPTIONS --guardedness --sized-types #-}
 module Data.ITree where
 
 open import Relation.Binary.PropositionalEquality
@@ -92,7 +91,7 @@ MonadITree′ _ = record { _>>=_ = _>>=_; return = ret }
 
 
 -- Indexes Itree/Tau by terminating programs
-data Terminates (i : Size) : ITree i S T R → Set where
+data Terminates (i : Size) : ITree i S T R → Set₁ where
     term-ret : (r : R) → Terminates i {S = S} {T = T} (ret r)
     term-tau : {j : Size< i} → {t : Tau i S T R} → Terminates j (τ t) → Terminates i (tau t)
     term-vis : (s : S) → {j : T s → ITree i S T R} → (k : (t : T s) → Terminates i (j t)) → Terminates i (vis s j)

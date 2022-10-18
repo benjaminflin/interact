@@ -1,4 +1,3 @@
-{-# OPTIONS --guardedness --sized-types #-}
 module Effect.Network where
 
 open import Data.ITree  

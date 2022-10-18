@@ -1,3 +1,4 @@
 name: interact 
-depend: standard-library 
+depend: standard-library cubical
 include: src app
+flags: --without-K --sized-types 

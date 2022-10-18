@@ -1,4 +1,3 @@
-{-# OPTIONS --guardedness --sized-types #-}
 module C.AST (Var : Set) where
 
 open import Data.Nat using (ℕ; _⊔_; NonZero; suc)

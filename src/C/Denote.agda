@@ -1,13 +1,14 @@
-{-# OPTIONS --guardedness --sized-types #-}
 module C.Denote (Var : Set) where
 
 open import Data.Unit
 open import Data.Nat
 open import Data.Nat.DivMod
 open import Data.Bool
-open import Data.List 
+open import Data.List renaming (map to lmap)
+open import Data.Digit
 open import Data.Sum 
 open import Data.Product 
+open import Data.Fin using () renaming (zero to fzero; suc to fsuc)
 open import Data.ITree hiding (_>>=_)
 open import Effect.Network using (NetworkE)
 open import C.AST (Var) 
@@ -22,7 +23,7 @@ import Data.Integer.DivMod as Int
 import Data.List.Relation.Unary.All as All
 
 data Val : Set where 
-    val : (n : ℕ) → (p : ℕ) → (n ≡ n % (suc p)) → Val
+    val : (n : ℕ) → (p : ℕ) → Val 
 
 open import Effect.Store (Var) (Val) using (StoreE; get; set)
     renaming (deref to deref′; ref to ref′)
@@ -41,15 +42,25 @@ open TraversableM (itreeMonad)
 -- denote-top-level (global-def x x₁ x₂) = {!   !}
 
 fromLiteral : Literal → PrimType → Val 
-fromLiteral (ℓint x) (int-type false p) = val (x Int.modℕ (suc p)) p {! !} 
-fromLiteral (ℓint x) (int-type true p) = val (Int.∣ x ∣ % suc p) p (sym $ m%n%n≡m%n Int.∣ x ∣ p) 
+fromLiteral (ℓint x) (int-type false p) = val (x Int.modℕ (suc p)) p
+fromLiteral (ℓint x) (int-type true p) = val Int.∣ x ∣ p
 
 binop : (a b : Val) → Ops.Binop → Val
-binop a b op = {!   !}
+binop (val n p) (val m q) Ops.+ = val (n + m) (p ⊔ q)
+binop (val n p) (val m q) Ops.- = 
+    let k = p ⊔ q in val (n + ∣ suc k - (m % suc k) ∣) k
+binop (val n p) (val m q) op = {!   !}
+
 
 unop : (a : Val) → Ops.Unop → Val
-unop a op = {!   !}
-
+unop (val 0 p) Ops.! = val 1 p 
+unop (val _ p) Ops.! = val 0 p 
+unop (val n p) Ops.~ = val (fromDigits $ lmap negate $ proj₁ $ toDigits 2 n) p 
+    where
+    negate : Bit → Bit 
+    negate fzero = 1b 
+    negate (fsuc fzero) = 0b
+    
 denote-expr : {t : Type} → Expr t → ITree′′ (StoreE ⊕ CallE) Val 
 denote-expr {prim p} (lit x) = ret $ fromLiteral x p
 denote-expr (e ⟨ o ⟩ f) = do

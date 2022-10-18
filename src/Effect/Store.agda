@@ -1,4 +1,3 @@
-{-# OPTIONS --guardedness --sized-types #-}
 module Effect.Store (Var Val : Set) where
 
 open import Data.Unit
